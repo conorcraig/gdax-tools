@@ -1,3 +1,4 @@
+def trlngStpLss()
 ## Bot for setting trailing stop loss in GDAX
 
 #Connect to API
