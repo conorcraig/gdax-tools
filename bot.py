@@ -17,8 +17,10 @@ def connectToAPI():
     print("Connected.\n")
     return auth_cl
 
-def stopLoss(auth_cl,orders,product,stopprice,accs):
+def stopLoss(auth_cl,product,stopprice,accs):
     
+    orders = records.getOrders(auth_cl) 
+
     coin = product.split('-')[0]
     size = float(accs[coin]['balance'])
     size = floor(size*10**8)
@@ -66,16 +68,17 @@ def percentageFormat(num,dec=2):
 
 class myWebSocketClient(gdax.WebsocketClient):
 
-    def listenToWebSocket(self,accs,avgPrice,gains,orders,stopLosses,auth_cl,messageLimit=10):
+    def listenToWebSocket(self,accs,avgPrice,gains,stopLosses,auth_cl,messageLimit=10):
         
         self.calcAccountValue(accs,products,auth_cl)
         self.get24HrHighs(products,auth_cl) #initialise lastSell values for unrealised gain/loss calcs
         self.start()
+        time.sleep(1)
 
         while self.message_count < messageLimit:
 
             self.calcUnrealisedGains(accs,avgPrice)
-            self.printStats(accs,avgPrice,gains,stopLosses)
+            self.printStats(avgPrice,gains,stopLosses)
             
             if self.newHigh:
 
@@ -83,9 +86,8 @@ class myWebSocketClient(gdax.WebsocketClient):
                 self.newHigh = False
                 
                 stopprice = 0.6*newHighDetail['price']
-
+                
                 stopLoss(auth_cl,
-                        orders,
                         product=newHighDetail['product_id'],
                         stopprice=stopprice,
                         accs=accs)
@@ -94,12 +96,20 @@ class myWebSocketClient(gdax.WebsocketClient):
 
             if self.orderHeard:
                 
-                time.sleep(5)
-                accs,currencies,tradeHistory,gains,balanceHistory,avgPrice = self.update(auth_cl)
-                print(accs)
-                print(gains)
-                time.sleep(60)
+                accs, gains, avgPrice = self.update(auth_cl)
+                self.calcAccountValue(accs,products,auth_cl)
                 self.orderHeard = False
+
+                for product in products:
+
+                    coin = product.split('-')[0]
+                    
+                    if float(accs[coin]['balance']) > 0.00000001:
+                    
+                        stopLoss(auth_cl,
+                                product=product,
+                                stopprice=stopLosses[product],
+                                accs=accs)
 
             time.sleep(5)
 
@@ -159,9 +169,9 @@ class myWebSocketClient(gdax.WebsocketClient):
                         #if partially filled, update accounts
                         #if done type, update accounts and remove from orders
 
-    def update(auth_cl):
-        print("\n")
-        print("Updating and saving data...")
+    def update(self,auth_cl):
+        
+        print("Order detected. Updating and saving data...")
 
         accs = records.getAccounts(auth_cl) 
         fills = records.getFills(auth_cl)
@@ -171,39 +181,9 @@ class myWebSocketClient(gdax.WebsocketClient):
         gains, balanceHistory, avgPrice = records.calcGainsBalancePrice(tradeHistory,currencies)
         accountlogging.logData(gains,avgPrice,balanceHistory,tradeHistory)
 
-        return accs,currencies,tradeHistory,gains,balanceHistory,avgPrice
+        return accs, gains, avgPrice
 
-
-    def get24HrHighs(self,products,auth_cl):
-
-        # print("24hr highs:")
-        for product in products: 
-            stats = auth_cl.get_product_24hr_stats(product)
-            self.maxValues[product] = float(stats['high'])
-            # print(product,stats['high'])
-
-    def calcUnrealisedGains(self,accs,avgPrice):
-
-            self.unrealisedGains = 0.0
-            for product in self.lastSell:
-                currency = product.split('-')
-                currency = currency[0]
-                self.unrealisedGains += float(accs[currency]['balance'])*(self.lastSell[product]-avgPrice[currency][-1])
-
-    def calcAccountValue(self,accs,products,auth_cl):
-
-        self.accVal['EUR'] = float(accs['EUR']['balance'])
-        self.accBal['EUR'] = float(accs['EUR']['balance'])
-        for product in products:
-            ticker = auth_cl.get_product_ticker(product)
-            self.lastSell[product] = float(ticker['price']) 
-            coin = product.split('-')[0]
-            # coin = coin[0]
-            self.accBal[coin] = float(accs[coin]['balance'])
-            self.accVal[coin] = self.accBal[coin] * self.lastSell[product]
-            self.accVal['EUR'] += self.accVal[coin]
-
-    def printStats(self,accs,avgPrice,gains,stopLosses):
+    def printStats(self,avgPrice,gains,stopLosses):
 
         os.system("cls")
 
@@ -269,6 +249,35 @@ class myWebSocketClient(gdax.WebsocketClient):
         print("Message count:\t",self.message_count,"\n")
         print("------------------------------------------------------------\n")
 
+    def calcAccountValue(self,accs,products,auth_cl):
+
+        self.accVal['EUR'] = float(accs['EUR']['balance'])
+        self.accBal['EUR'] = float(accs['EUR']['balance'])
+        for product in products:
+            ticker = auth_cl.get_product_ticker(product)
+            self.lastSell[product] = float(ticker['price']) 
+            coin = product.split('-')[0]
+            # coin = coin[0]
+            self.accBal[coin] = float(accs[coin]['balance'])
+            self.accVal[coin] = self.accBal[coin] * self.lastSell[product]
+            self.accVal['EUR'] += self.accVal[coin]
+    
+    def get24HrHighs(self,products,auth_cl):
+
+        # print("24hr highs:")
+        for product in products: 
+            stats = auth_cl.get_product_24hr_stats(product)
+            self.maxValues[product] = float(stats['high'])
+            # print(product,stats['high'])
+
+    def calcUnrealisedGains(self,accs,avgPrice):
+
+            self.unrealisedGains = 0.0
+            for product in self.lastSell:
+                currency = product.split('-')
+                currency = currency[0]
+                self.unrealisedGains += float(accs[currency]['balance'])*(self.lastSell[product]-avgPrice[currency][-1])
+
 auth_cl = connectToAPI()
 
 products = ["BTC-EUR", "ETH-EUR", "LTC-EUR"]
@@ -282,7 +291,6 @@ wsClient = myWebSocketClient(api_key=credentials.login['api_key'],
 
 accs = records.getAccounts(auth_cl) 
 fills = records.getFills(auth_cl)
-orders = records.getOrders(auth_cl)
 
 currencies = records.getCurrencies(accs) 
 tradeHistory = records.compileTradeHistory(fills,accs)
@@ -342,18 +350,15 @@ for product in products:
             stopprice = (1.0 - acceptableLoss) * avgPrice[coin][-1]
 
         stopLoss(auth_cl,
-                orders,
                 product=product,
                 stopprice=stopprice,
                 accs=accs)
 
         stopLosses[product] = stopprice
 
-orders = records.getOrders(auth_cl)
-
 accountlogging.logData(gains,avgPrice,balanceHistory,tradeHistory)
 
-wsClient.listenToWebSocket(accs,avgPrice,gains,orders,stopLosses,auth_cl,messageLimit=500000)
+wsClient.listenToWebSocket(accs,avgPrice,gains,stopLosses,auth_cl,messageLimit=500000)
 
 #each time script is restated, clear all stop losses, and set again based on current situation 
 

@@ -20,12 +20,12 @@ def getFills(auth_cl):
     return(fills)
 
 def getAccounts(auth_cl):
-    print("Get all currency accounts.")
+    #print("Get all currency accounts.")
     accsList = auth_cl.get_accounts() #Pull details of each currency account
     accs = {} 
     #For each account, get current balance and pull transfer history.
     for acc in accsList:
-        print(acc['currency'], acc['balance'])
+        #print(acc['currency'], acc['balance'])
         # print('Getting account history...')
         historyPaginated = auth_cl.get_account_history(acc['id'])
         history = unpaginate(historyPaginated,sortBy='created_at')
@@ -36,7 +36,7 @@ def getAccounts(auth_cl):
         # print("Transfer history extracted.\n")
         #Create dictionary each currency for easier access
         accs[acc['currency']] = acc
-    return(accs)
+    return accs
 
 def getOrders(auth_cl):
     ordersPaginated = auth_cl.get_orders()
